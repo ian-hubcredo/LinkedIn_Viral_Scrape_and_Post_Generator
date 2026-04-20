@@ -1,0 +1,896 @@
+{
+  "name": "Linkedin Post Content Generation",
+  "nodes": [
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.apify.com/v2/acts/<REDACTED_ACTOR_ID>/run-sync-get-dataset-items",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "maxItems",
+              "value": "5"
+            },
+            {
+              "name": "limit",
+              "value": "5"
+            }
+          ]
+        },
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Accept",
+              "value": "application/json"
+            },
+            {
+              "name": "Authorization",
+              "value": "Bearer <APIFY_API_TOKEN>"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"limit\": 4,\n  \"usernames\": [\n    \"{{ $json.profile_url }}\"\n    ]\n} ",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        160,
+        6528
+      ],
+      "id": "de5df2e2-2a6c-49c7-8566-78c78cd77773",
+      "name": "HTTP Request",
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        -752,
+        6432
+      ],
+      "id": "3e489e89-35d3-4524-986c-ad5c7b2b80ec",
+      "name": "When clicking ‘Execute workflow’"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "b93a1cbb-d581-4a43-b1a5-29aa8f54c9ea",
+              "leftValue": "={{ $json.virality_score }}",
+              "rightValue": 1000,
+              "operator": {
+                "type": "number",
+                "operation": "gte"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.filter",
+      "typeVersion": 2.2,
+      "position": [
+        944,
+        6528
+      ],
+      "id": "a330930f-5af3-4038-a4ca-3db9b546fe2a",
+      "name": "Filter Viral Posts",
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "e425969a-be6f-4bb4-85bd-c234d7a9b764",
+              "name": "post_text",
+              "value": "={{ $json.text }}",
+              "type": "string"
+            },
+            {
+              "id": "1f4a7be5-3866-4d25-81ba-5d1b88feb27c",
+              "name": "post_url",
+              "value": "={{ $json.url }}",
+              "type": "string"
+            },
+            {
+              "id": "567ce2ec-8716-4c9a-bae0-5cc56689a506",
+              "name": "impression_stats",
+              "value": "={{ $json.stats }}",
+              "type": "object"
+            },
+            {
+              "id": "2701e25b-f989-4527-a96c-5139d37315bd",
+              "name": "profile_url",
+              "value": "={{ $json.author.profile_url }}",
+              "type": "string"
+            },
+            {
+              "id": "ba7b9a5b-b17f-4ac4-a86b-4c3ec74a00b7",
+              "name": "keyword",
+              "value": "={{ $('Get row(s) in sheet').item.json.keyword }}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        352,
+        6528
+      ],
+      "id": "c7663030-daeb-4cda-a131-43c61452b0f5",
+      "name": "Set Post Data"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "9517a4fd-9151-47ad-a986-1aaaf6897ca2",
+              "leftValue": "={{ $json.post_text }}",
+              "rightValue": "",
+              "operator": {
+                "type": "string",
+                "operation": "notEmpty",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.filter",
+      "typeVersion": 2.2,
+      "position": [
+        544,
+        6528
+      ],
+      "id": "36b607e4-1aa9-42e8-bad9-8cdc0a5f8e09",
+      "name": "Remove Null Posts Returned by Apify"
+    },
+    {
+      "parameters": {
+        "jsCode": "const processedPosts = [];\n\n// Define the weights for your virality score\nconst weights = {\n  like: 1,\n  support: 2,\n  love: 2,\n  insight: 2,\n  celebrate: 2,\n  funny: 2,\n  comments: 5,\n  reposts: 10\n};\n\n// Loop through all incoming n8n items\nfor (const item of $input.all()) {\n  \n  // item.json IS the post object. (This was the mistake)\n  const post = item.json; \n\n  // --- Data Cleaning ---\n  // Skip any items that are missing stats or text\n  if (!post.impression_stats || !post.post_text) {\n    continue; // Skips this loop iteration and goes to the next post\n  }\n\n  // Get the stats object for easier access\n  const stats = post.impression_stats;\n\n  // --- 1. Flatten All Stats ---\n  // Use '|| 0' to set a default of 0 if a value is null\n  const like = stats.like || 0;\n  const support = stats.support || 0;\n  const love = stats.love || 0;\n  const insight = stats.insight || 0;\n  const celebrate = stats.celebrate || 0;\n  const funny = stats.funny || 0;\n  const total_reactions = stats.total_reactions || 0;\n  const comments = stats.comments || 0;\n  const reposts = stats.reposts || 0;\n\n  // --- 2. Calculate Simple Sum ---\n  // This is just a raw count of all interactions\n  const total_engagement_sum = total_reactions + comments + reposts;\n\n  // --- 3. Calculate Weighted Virality Score ---\n  const virality_score =\n    (like * weights.like) +\n    (support * weights.support) +\n    (love * weights.love) +\n    (insight * weights.insight) +\n    (celebrate * weights.celebrate) +\n    (funny * weights.funny) +\n    (comments * weights.comments) +\n    (reposts * weights.reposts);\n\n  // --- Create the new, flat object ---\n  const flatPost = {\n    post_text: post.post_text,\n    post_url: post.post_url,\n    keyword: post.keyword,\n    profile_url: post.profile_url,\n    \n    // Add all flattened stats\n    total_reactions: total_reactions,\n    like: like,\n    support: support,\n    love: love,\n    insight: insight,\n    celebrate: celebrate,\n    funny: funny,\n    comments: comments,\n    reposts: reposts,\n    \n    // Add your new calculated fields\n    total_engagement_sum: total_engagement_sum,\n    virality_score: virality_score\n  };\n  \n  processedPosts.push(flatPost);\n}\n\n// Return the new, clean list for the next node\nreturn processedPosts.map(post => ({ json: post }));"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        736,
+        6528
+      ],
+      "id": "881a576e-193e-47cb-9e8f-d3b0483d79c2",
+      "name": "Calculate Impression and Virality Score"
+    },
+    {
+      "parameters": {
+        "tableId": "viral_posts_new",
+        "fieldsUi": {
+          "fieldValues": [
+            {
+              "fieldId": "post_url",
+              "fieldValue": "={{ $json.post_url }}"
+            },
+            {
+              "fieldId": "post_text",
+              "fieldValue": "={{ $json.post_text }}"
+            },
+            {
+              "fieldId": "keyword",
+              "fieldValue": "={{ $json.keyword }}"
+            },
+            {
+              "fieldId": "virality_score",
+              "fieldValue": "={{ $json.virality_score }}"
+            },
+            {
+              "fieldId": "profile_url",
+              "fieldValue": "={{ $json.profile_url }}"
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [
+        1552,
+        6512
+      ],
+      "id": "1e3f6240-64e7-4601-831c-412d5f3d4a2e",
+      "name": "Add Posts to Viral_Posts Table in Supabase DB",
+      "credentials": {
+        "supabaseApi": {
+          "id": "<REDACTED_CREDENTIAL_ID>", "name": "<REDACTED_CREDENTIAL_NAME>"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 3,
+      "position": [
+        -128,
+        6432
+      ],
+      "id": "630f3d2d-2586-4597-a73e-c2412bd1f4b1",
+      "name": "Loop Over Items"
+    },
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        1744,
+        6512
+      ],
+      "id": "2a6b1994-3b12-464b-9836-5b02c7bc88ed",
+      "name": "Wait",
+      "webhookId": "<REDACTED_WEBHOOK_ID>"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "d9631300-151c-46bf-a651-66061aab108a",
+              "leftValue": "={{ $json.post_text }}",
+              "rightValue": "",
+              "operator": {
+                "type": "string",
+                "operation": "notEmpty",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1328,
+        6528
+      ],
+      "id": "0a5f62a4-34b3-48d4-a501-5441fb626c9e",
+      "name": "If"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "e425969a-be6f-4bb4-85bd-c234d7a9b764",
+              "name": "post_text",
+              "value": "={{ $json.post_text }}",
+              "type": "string"
+            },
+            {
+              "id": "1f4a7be5-3866-4d25-81ba-5d1b88feb27c",
+              "name": "post_url",
+              "value": "={{ $json.post_url }}",
+              "type": "string"
+            },
+            {
+              "id": "5e9c811b-9ac4-489c-8a88-175cb36ee1a2",
+              "name": "keyword",
+              "value": "={{ $json.keyword }}",
+              "type": "string"
+            },
+            {
+              "id": "606e9939-ae18-4b38-8fff-e72aee61c186",
+              "name": "profile_url",
+              "value": "={{ $json.profile_url }}",
+              "type": "string"
+            },
+            {
+              "id": "fc2f996a-e60f-41b4-8cc8-4406d5263527",
+              "name": "virality_score",
+              "value": "={{ $json.virality_score }}",
+              "type": "number"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        1136,
+        6528
+      ],
+      "id": "4fe4410b-b008-43f2-933b-3a3a862f1505",
+      "name": "Set Post Data for Supabase"
+    },
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [
+        160,
+        6320
+      ],
+      "id": "21e77649-44b7-4bfc-a873-be30889b8b76",
+      "name": "No Operation, do nothing"
+    },
+    {
+      "parameters": {
+        "content": "*Fetch LinkedIn content creator profile url from Content Creator Spreadsheet*",
+        "height": 96,
+        "width": 368,
+        "color": 4
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [
+        -704,
+        6288
+      ],
+      "typeVersion": 1,
+      "id": "8cb0de01-ac7c-4739-9a45-65cb5ac1a7be",
+      "name": "Sticky Note"
+    },
+    {
+      "parameters": {
+        "content": "*Scrape content creators posts using Apify Profile Post Scraper*",
+        "height": 96,
+        "width": 368,
+        "color": 4
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [
+        32,
+        6768
+      ],
+      "typeVersion": 1,
+      "id": "66c2462a-6a3b-494f-bea2-72377955276d",
+      "name": "Sticky Note1"
+    },
+    {
+      "parameters": {
+        "content": "*Calculating Virality score of posts and Filtering out Viral posts based on Virality score*",
+        "height": 96,
+        "width": 368,
+        "color": 4
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [
+        720,
+        6384
+      ],
+      "typeVersion": 1,
+      "id": "1d1e06ab-3290-4fd0-9067-1cbd87b83723",
+      "name": "Sticky Note2"
+    },
+    {
+      "parameters": {
+        "content": "*Storing Viral Posts in Supabase DB for future retrieval*",
+        "height": 96,
+        "width": 368,
+        "color": 4
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [
+        1456,
+        6368
+      ],
+      "typeVersion": 1,
+      "id": "c50a77d7-dfd1-4c0e-a3b5-0e96f8c309d7",
+      "name": "Sticky Note3"
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "generate-structured-post",
+        "responseMode": "responseNode",
+        "options": {
+          "allowedOrigins": "*"
+        }
+      },
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        -640,
+        7232
+      ],
+      "id": "8a1268a3-bfff-4768-9946-d16b439e62d3",
+      "name": "Generate Structured Viral Post",
+      "webhookId": "<REDACTED_WEBHOOK_ID>"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "148ecb7a-ce93-4c0c-b81c-85f03b94eec0",
+              "name": "topic",
+              "value": "={{ $json.body.topic}}",
+              "type": "string"
+            },
+            {
+              "id": "7696cde7-cf20-433a-9a28-1a1367c5909b",
+              "name": "keyword",
+              "value": "={{ $json.body.category}}",
+              "type": "string"
+            },
+            {
+              "id": "74a40a12-8ace-49f3-b5d6-42b15b694058",
+              "name": "sample_structure",
+              "value": "={{ $json.body.selected_sample.content}}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        -432,
+        7232
+      ],
+      "id": "e88b9fe9-6dfb-4645-b0cb-023fc20c0015",
+      "name": "Set Reference Post"
+    },
+    {
+      "parameters": {
+        "jsonSchemaExample": "{\n\"post_text\": \"Are you still selling with data sheets and demos? The fastest-growing B2B brands have shifted to a trust-first approach.\"\n}\n"
+      },
+      "type": "@n8n/n8n-nodes-langchain.outputParserStructured",
+      "typeVersion": 1.3,
+      "position": [
+        -48,
+        7440
+      ],
+      "id": "aed10a7d-57e9-4101-bade-5f8fffc41775",
+      "name": "Structured Output Parser10"
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatGoogleGemini",
+      "typeVersion": 1,
+      "position": [
+        -240,
+        7440
+      ],
+      "id": "f0e37760-3ee5-4531-8bc5-50a332f32c5c",
+      "name": "Google Gemini Chat Model11",
+      "credentials": {
+        "googlePalmApi": {
+          "id": "<REDACTED_CREDENTIAL_ID>", "name": "<REDACTED_CREDENTIAL_NAME>"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "41c06ca5-350f-4b4a-b579-b992cfd30ce0",
+              "name": "post_content",
+              "value": "={{ $json.output.post_text}}",
+              "type": "string"
+            },
+            {
+              "id": "c16bb549-7f29-41dc-aa6b-24ed782b40dd",
+              "name": "sample_structure",
+              "value": "={{ $('Set Reference Post').item.json.sample_structure }}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        128,
+        7232
+      ],
+      "id": "06b527f0-bfed-4137-b1e1-2a1326535d92",
+      "name": "Set Post for Structure agent"
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=Generate a Viral Linkedin Post :\n\nTopic : {{ $json.topic }}\n\nCategory/Keyword : {{ $json.keyword }}\n\nReference viral posts details :\nPost Content : {{ $json.sample_structure }}\n\nStructure your post based on reference post provided\n\nAvoid emojis and don't add any dashes(-)\n\nInclude Post Headline in the post content only directly\n\n",
+        "hasOutputParser": true,
+        "options": {
+          "systemMessage": "=<AgentPrompt version=\"1.0\">\n  <Role>\n    LinkedIn post writer agent, converts viral examples and a user style profile into one high-engagement LinkedIn post, returns machine-readable JSON only\n  </Role>\n\n  <Goal>\n    Generate a ready-to-post LinkedIn update that follows proven viral structures, matches requested tone and user style, and includes metadata about sources and style match\n  </Goal>\n\n  <Instructions>\n    <FormatAndStructure>\n      produce one LinkedIn post, max 2800 characters\n      use this order: Hook (1-2 short lines), Story (3-6 short sentences), Lesson or Insight (1-2 lines), Call to Action (1 line), Hashtags (3-5)\n      use blank lines between sections for readable line breaks\n    </FormatAndStructure>\n\n    <VoiceAndStyle>\n      match requested tone, while preserving user_style_profile\n      prefer short sentences, active voice, conversational language\n      avoid jargon, keep language simple and direct\n    </VoiceAndStyle>\n\n    <UseOfReferences>\n      treat viral_examples as inspiration, not copy\n      synthesize hooks, cadence, emotional beats, and structural rhythm from examples\n      do not reproduce more than 25 consecutive words from any example\n      list borrowed elements in metadata\n    </UseOfReferences>\n\n    <ContentRules>\n      no medical, legal, or financial advice\n      avoid PII from examples unless the user owns it\n      no claims without evidence\n    </ContentRules>\n\n    <Modes>\n      generate_post\n    </Modes>\n\n    <WhenNoUserStyle>\n      use neutral, high-engagement LinkedIn voice: confident, helpful, slightly personal\n    </WhenNoUserStyle>\n\n    <CreatorAnalysisMode>\n      if mode is analyze_creator_style, return creator_style_profile summarizing cadence, sentence length, emoji usage, structural patterns\n    </CreatorAnalysisMode>\n\n    <ValidationHints>\n      require tone_match_score and user_style_match_score between 0 and 1\n      ensure post_text not empty\n      include source_examples_used array with urls and elements borrowed\n    </ValidationHints>\n\n    <N8NRecommendations>\n      model: best available generative model\n      temperature: 0.2 to 0.35 for consistent structure\n      top_p: 0.9\n      max_tokens: 800\n      frequency_penalty: 0.2\n      presence_penalty: 0.0\n      on validation failure, retry once with temperature -0.05\n    </N8NRecommendations>\n  </Instructions>\n\n  <ExampleFrameworks>\n    <Example id=\"b2b_trust\">\n      <Title>B2B, The Trust Revolution</Title>\n      <Structure>Headline, Hook, Insight, 3-step playbook, CTA</Structure>\n      <Sample>\n        Why Trust Is Your 2025 B2B Advantage\n\n        Are you still selling with datasheets and demos?\n\n        1. Share client wins in bite-sized posts\n        2. Use short video intros for outreach\n        3. Map solutions to deep pain points\n\n        Want the trust PDF? Comment TRUST\n\n        #b2b #trust #sales\n      </Sample>\n    </Example>\n\n    <Example id=\"sales_dm\">\n      <Title>Sales, DM Script Wins</Title>\n      <Structure>Headline, Pain, Exact script, Result, CTA</Structure>\n      <Sample>\n        Booked 5 Meetings in 1 Day, My Exact DM Script\n\n        Most DMs get ignored. Use this:\n        \"Hi [Name], noticed you’re scaling [role]. Ever tried [solution]? Quick tip on [result]. OK if I share?\"\n\n        Result: 18% reply rate, 5 meetings.\n\n        Like for scripts\n\n        #sales #linkedin #outreach\n      </Sample>\n    </Example>\n\n    <Example id=\"automation\">\n      <Title>Automation, Save Hours</Title>\n      <Structure>Headline, Contrast, Steps, Tool specifics, CTA</Structure>\n      <Sample>\n        How I Automated Follow-ups, 8 Hours Saved Weekly\n\n        Manual follow-ups burn time.\n        1. Use tool for auto-DMs and reminders\n        2. Sync connects to CRM\n        3. AI drafts replies\n\n        Saved 8 hours per week, DM for setup\n\n        #automation #productivity #ai\n      </Sample>\n    </Example>\n\n    <Example id=\"creator_style\">\n      <Title>Creator Style Outline</Title>\n      <Structure>Cadence, SentenceLength, EmojiUsage, RecurringPatterns</Structure>\n      <Sample>\n        cadence: short hook, 2-3 sentence story beats, single-line lessons\n        avg_sentence_length: 10-14\n        emoji_usage: low\n        recurring_patterns: question hooks, personal confession, numbered steps, CTA to comment\n      </Sample>\n    </Example>\n  </ExampleFrameworks>\n\n  <SampleUserPrompt>\n    {\n      \"mode\":\"generate_post\",\n      \"topic\":\"handle scope creep in B2B projects\",\n      \"desired_tone\":\"confident, helpful\",\n      \"viral_examples\":[\n        {\"id\":\"ex1\",\"content\":\"<full post text>\",\"url\":\"https://...\"},\n        {\"id\":\"ex2\",\"content\":\"<full post text>\",\"url\":\"https://...\"},\n        {\"id\":\"ex3\",\"content\":\"<full post text>\",\"url\":\"https://...\"}\n      ],\n      \"user_style_profile\": {\n        \"avg_sentence_length\":12,\n        \"emoji_usage\":\"low\",\n        \"common_phrases\":[\"here's how\",\"learned the hard way\"],\n        \"tone\":\"direct, helpful\"\n      }\n    }\n  </SampleUserPrompt>\n</AgentPrompt>\n"
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 2.2,
+      "position": [
+        -208,
+        7232
+      ],
+      "id": "7fbb6a34-aeb5-438e-82ed-342d500ee452",
+      "name": "LinkedIn Post Content Agent3"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Get the input array (from previous node)\nconst items = $input.all();\n\n// Map the input structure into desired JSON output\nreturn items.map(item => {\n  const post = item.json;\n\n  return {\n    json: {\n      generated_post: {\n        content: post.post_content || \"\",\n        structure_used: $input.first().json.sample_structure\n      }\n    }\n  };\n});\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        512,
+        7232
+      ],
+      "id": "01b1c659-aa8f-4d43-81d6-63b4b58aa0a6",
+      "name": "Format Response"
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ $json }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.4,
+      "position": [
+        720,
+        7232
+      ],
+      "id": "4eb1add7-b309-4914-8c05-29d0ea1a75e6",
+      "name": "Respond to Post Generation Webhook"
+    },
+    {
+      "parameters": {
+        "mode": "markdownToHtml",
+        "markdown": "={{ $json.post_content }}",
+        "destinationKey": "post_content",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.markdown",
+      "typeVersion": 1,
+      "position": [
+        320,
+        7232
+      ],
+      "id": "dfd6be21-a7fe-4309-8e69-1b9ddaee7b0e",
+      "name": "Markdown1"
+    },
+    {
+      "parameters": {
+        "maxItems": 16,
+        "keep": "lastItems"
+      },
+      "type": "n8n-nodes-base.limit",
+      "typeVersion": 1,
+      "position": [
+        -368,
+        6432
+      ],
+      "id": "766695d0-c04f-4146-be1e-66ebf0636ae9",
+      "name": "Limit"
+    },
+    {
+      "parameters": {
+        "documentId": {
+          "__rl": true,
+          "value": "14fYvgAmtrVJLV_qXDSVkmDjoUbDjtyKN9jslop09thE",
+          "mode": "list",
+          "cachedResultName": "LinkedIn Content Creators",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/<REDACTED_SHEET_ID>/edit?usp=drivesdk"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "gid=0",
+          "mode": "list",
+          "cachedResultName": "Sheet1",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/<REDACTED_SHEET_ID>/edit#gid=0"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        -560,
+        6432
+      ],
+      "id": "8c4ede0a-ed16-49d1-b8a3-fce1dfedcad3",
+      "name": "Get row(s) in sheet",
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "<REDACTED_CREDENTIAL_ID>", "name": "<REDACTED_CREDENTIAL_NAME>"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "HTTP Request": {
+      "main": [
+        [
+          {
+            "node": "Set Post Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "When clicking ‘Execute workflow’": {
+      "main": [
+        [
+          {
+            "node": "Get row(s) in sheet",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Set Post Data": {
+      "main": [
+        [
+          {
+            "node": "Remove Null Posts Returned by Apify",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Remove Null Posts Returned by Apify": {
+      "main": [
+        [
+          {
+            "node": "Calculate Impression and Virality Score",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Calculate Impression and Virality Score": {
+      "main": [
+        [
+          {
+            "node": "Filter Viral Posts",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Filter Viral Posts": {
+      "main": [
+        [
+          {
+            "node": "Set Post Data for Supabase",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Loop Over Items": {
+      "main": [
+        [
+          {
+            "node": "No Operation, do nothing",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "HTTP Request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Add Posts to Viral_Posts Table in Supabase DB": {
+      "main": [
+        [
+          {
+            "node": "Wait",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Wait": {
+      "main": [
+        [
+          {
+            "node": "Loop Over Items",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Set Post Data for Supabase": {
+      "main": [
+        [
+          {
+            "node": "If",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "If": {
+      "main": [
+        [
+          {
+            "node": "Add Posts to Viral_Posts Table in Supabase DB",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Loop Over Items",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Generate Structured Viral Post": {
+      "main": [
+        [
+          {
+            "node": "Set Reference Post",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Structured Output Parser10": {
+      "ai_outputParser": [
+        [
+          {
+            "node": "LinkedIn Post Content Agent3",
+            "type": "ai_outputParser",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Google Gemini Chat Model11": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "LinkedIn Post Content Agent3",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Set Reference Post": {
+      "main": [
+        [
+          {
+            "node": "LinkedIn Post Content Agent3",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Set Post for Structure agent": {
+      "main": [
+        [
+          {
+            "node": "Markdown1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "LinkedIn Post Content Agent3": {
+      "main": [
+        [
+          {
+            "node": "Set Post for Structure agent",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Format Response": {
+      "main": [
+        [
+          {
+            "node": "Respond to Post Generation Webhook",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Markdown1": {
+      "main": [
+        [
+          {
+            "node": "Format Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Limit": {
+      "main": [
+        [
+          {
+            "node": "Loop Over Items",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get row(s) in sheet": {
+      "main": [
+        [
+          {
+            "node": "Limit",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "staticData": {
+    "node:Schedule Trigger": {
+      "recurrenceRules": [
+        18
+      ]
+    }
+  },
+  "pinData": {},
+  "triggerCount": 1,
+  "meta": {
+    "templateCredsSetupCompleted": true
+  }
+}
